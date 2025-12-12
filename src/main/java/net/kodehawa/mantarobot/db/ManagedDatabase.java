@@ -1,0 +1,366 @@
+/*
+ * Copyright (C) 2016 Kodehawa
+ *
+ * Mantaro is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * Mantaro is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Mantaro. If not, see http://www.gnu.org/licenses/
+ *
+ */
+
+package net.kodehawa.mantarobot.db;
+
+import com.google.common.collect.Lists;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.FindOneAndReplaceOptions;
+import com.mongodb.client.model.ReturnDocument;
+import com.mongodb.client.model.UpdateOptions;
+import com.mongodb.client.model.Updates;
+import net.dv8tion.jda.api.entities.Guild;
+import net.dv8tion.jda.api.entities.Member;
+import net.dv8tion.jda.api.entities.User;
+import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
+import net.kodehawa.mantarobot.ExtraRuntimeOptions;
+import net.kodehawa.mantarobot.db.entities.CustomCommand;
+import net.kodehawa.mantarobot.db.entities.MongoGuild;
+import net.kodehawa.mantarobot.db.entities.MantaroObject;
+import net.kodehawa.mantarobot.db.entities.Marriage;
+import net.kodehawa.mantarobot.db.entities.MongoUser;
+import net.kodehawa.mantarobot.db.entities.Player;
+import net.kodehawa.mantarobot.db.entities.PlayerStats;
+import net.kodehawa.mantarobot.db.entities.PremiumKey;
+import org.bson.Document;
+import org.bson.conversions.Bson;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.CheckReturnValue;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+public class ManagedDatabase {
+    private static final Logger log = LoggerFactory.getLogger(ManagedDatabase.class);
+    private final MongoClient mongoClient;
+
+    public ManagedDatabase(@Nonnull MongoClient mongoClient) {
+        this.mongoClient = mongoClient;
+    }
+
+    private static void log(String message, Object... fmtArgs) {
+        if (ExtraRuntimeOptions.LOG_DB_ACCESS) {
+            log.info(message, fmtArgs);
+        }
+    }
+
+    private static void log(String message) {
+        if (ExtraRuntimeOptions.LOG_DB_ACCESS) {
+            log.info(message);
+        }
+    }
+
+    public MongoDatabase dbMantaro() {
+        return mongoClient.getDatabase("mantaro");
+    }
+
+    @Nullable
+    @CheckReturnValue
+    public CustomCommand getCustomCommand(@Nonnull String guildId, @Nonnull String name) {
+        var id = guildId + ":" + name;
+        log("Requesting Custom Command {} from MongoDB", id);
+
+        MongoCollection<CustomCommand> collection = dbMantaro().getCollection(CustomCommand.DB_TABLE, CustomCommand.class);
+        return collection.find().filter(Filters.eq(id)).first();
+    }
+
+    @Nullable
+    @CheckReturnValue
+    public CustomCommand getCustomCommand(@Nonnull Guild guild, @Nonnull String name) {
+        return getCustomCommand(guild.getId(), name);
+    }
+
+    @SuppressWarnings("unused")
+    @Nullable
+    @CheckReturnValue
+    public CustomCommand getCustomCommand(@Nonnull MongoGuild guild, @Nonnull String name) {
+        return getCustomCommand(guild.getId(), name);
+    }
+
+    @SuppressWarnings("unused")
+    @Nullable
+    @CheckReturnValue
+    public CustomCommand getCustomCommand(@Nonnull MessageReceivedEvent event, @Nonnull String cmd) {
+        return getCustomCommand(event.getGuild(), cmd);
+    }
+
+    @SuppressWarnings("unused")
+    @Nonnull
+    @CheckReturnValue
+    public List<CustomCommand> getCustomCommands() {
+        log("Requesting all Custom Commands from MongoDB");
+        return Lists.newArrayList(dbMantaro().getCollection(CustomCommand.DB_TABLE, CustomCommand.class).find());
+    }
+
+    @Nonnull
+    @CheckReturnValue
+    public List<CustomCommand> getCustomCommands(@Nonnull String guildId) {
+        log("Requesting all Custom Commands from MongoDB on guild {}", guildId);
+        var collection = dbMantaro().getCollection(CustomCommand.DB_TABLE, CustomCommand.class);
+        return Lists.newArrayList(collection.find(Filters.eq("guildId", guildId)));
+    }
+
+    @Nonnull
+    @CheckReturnValue
+    public List<CustomCommand> getCustomCommands(@Nonnull Guild guild) {
+        return getCustomCommands(guild.getId());
+    }
+
+    @SuppressWarnings("unused")
+    @Nonnull
+    @CheckReturnValue
+    public List<CustomCommand> getCustomCommands(@Nonnull MongoGuild guild) {
+        return getCustomCommands(guild.getId());
+    }
+
+    @Nonnull
+    @CheckReturnValue
+    public MongoGuild getGuild(@Nonnull String guildId) {
+        log("Requesting Guild {} from MongoDB", guildId);
+        var collection = dbMantaro().getCollection(MongoGuild.DB_TABLE, MongoGuild.class);
+        var guild = collection.find().filter(Filters.eq(guildId)).first();
+        return guild == null ? MongoGuild.of(guildId) : guild;
+    }
+
+    @Nonnull
+    @CheckReturnValue
+    public MongoGuild getGuild(@Nonnull Guild guild) {
+        return getGuild(guild.getId());
+    }
+
+    @SuppressWarnings("unused")
+    @Nonnull
+    @CheckReturnValue
+    public MongoGuild getGuild(@Nonnull Member member) {
+        return getGuild(member.getGuild());
+    }
+
+    @SuppressWarnings("unused")
+    @Nonnull
+    @CheckReturnValue
+    public MongoGuild getGuild(@Nonnull MessageReceivedEvent event) {
+        return getGuild(event.getGuild());
+    }
+
+    @Nonnull
+    @CheckReturnValue
+    public MantaroObject getMantaroData() {
+        log("Requesting MantaroObject from MongoDB");
+        var collection = dbMantaro().getCollection(MantaroObject.DB_TABLE, MantaroObject.class);
+        var obj = collection.find().filter(Filters.eq("mantaro")).first();
+        if (obj == null) {
+            // quick fix for the id being wrong, just create obj from the old one -- should work.
+            // next save should save it with the correct id, which should make this re-assigning superfluous after its fixed.
+            obj = collection.find().first();
+            if (obj == null) {
+                obj = MantaroObject.create();
+                obj.insertOrReplace();
+            }
+        }
+
+        return obj;
+    }
+
+    @Nonnull
+    @CheckReturnValue
+    public Player getPlayer(@Nonnull String userId) {
+        log("Requesting Player {} from MongoDB", userId);
+        var collection = dbMantaro().getCollection(Player.DB_TABLE, Player.class);
+        var player = collection.find().filter(Filters.eq(userId)).first();
+
+        return player == null ? Player.of(userId) : player;
+    }
+
+    @Nonnull
+    @CheckReturnValue
+    public Player getPlayer(@Nonnull User user) {
+        return getPlayer(user.getId());
+    }
+
+    @Nonnull
+    @CheckReturnValue
+    public Player getPlayer(@Nonnull Member member) {
+        return getPlayer(member.getUser());
+    }
+
+    @Nonnull
+    @CheckReturnValue
+    public PlayerStats getPlayerStats(@Nonnull String userId) {
+        log("Requesting PlayerStats {} from MongoDB", userId);
+        var collection = dbMantaro().getCollection(PlayerStats.DB_TABLE, PlayerStats.class);
+        var stats = collection.find().filter(Filters.eq(userId)).first();
+
+        return stats == null ? PlayerStats.of(userId) : stats;
+    }
+
+    @Nonnull
+    @CheckReturnValue
+    public PlayerStats getPlayerStats(@Nonnull User user) {
+        return getPlayerStats(user.getId());
+    }
+
+    @Nonnull
+    @CheckReturnValue
+    public PlayerStats getPlayerStats(@Nonnull Member member) {
+        return getPlayerStats(member.getUser());
+    }
+
+    //Can be null and it's perfectly valid.
+    public Marriage getMarriage(String marriageId) {
+        if (marriageId == null) {
+            return null;
+        }
+
+        log("Requesting Marriage {} from MongoDB", marriageId);
+        return dbMantaro().getCollection(Marriage.DB_TABLE, Marriage.class).find(Filters.eq(marriageId)).first();
+    }
+
+    @SuppressWarnings("unused")
+    @Nonnull
+    @CheckReturnValue
+    public List<Marriage> getMarriages() {
+        log("Requesting all Marriages from MongoDB");
+        return Lists.newArrayList(dbMantaro().getCollection(Marriage.DB_TABLE, Marriage.class).find());
+    }
+
+    @SuppressWarnings("unused")
+    @Nonnull
+    @CheckReturnValue
+    public List<PremiumKey> getPremiumKeys() {
+        log("Requesting all Premium Keys from MongoDB");
+        var collection = dbMantaro().getCollection(PremiumKey.DB_TABLE, PremiumKey.class);
+        return Lists.newArrayList(collection.find());
+    }
+
+    //Also tests if the key is valid or not!
+    @Nullable
+    @CheckReturnValue
+    public PremiumKey getPremiumKey(@Nullable String id) {
+        log("Requesting Premium Key {} from MongoDB", id);
+        if (id == null) return null;
+
+        var collection = dbMantaro().getCollection(PremiumKey.DB_TABLE, PremiumKey.class);
+        return collection.find().filter(Filters.eq(id)).first();
+    }
+
+    @Nonnull
+    @CheckReturnValue
+    public MongoUser getUser(@Nonnull String userId) {
+        log("Requesting User {} from MongoDB", userId);
+        var collection = dbMantaro().getCollection(MongoUser.DB_TABLE, MongoUser.class);
+        var user = collection.find().filter(Filters.eq(userId)).first();
+
+        return user == null ? MongoUser.of(userId) : user;
+    }
+
+    @Nonnull
+    @CheckReturnValue
+    public MongoUser getUser(@Nonnull User user) {
+        return getUser(user.getId());
+    }
+
+    @Nonnull
+    @CheckReturnValue
+    public MongoUser getUser(@Nonnull Member member) {
+        return getUser(member.getUser());
+    }
+
+    public <T extends ManagedMongoObject> void saveMongo(@Nonnull T object, Class<T> clazz) {
+        log("Saving {} {}:{} to MongoDB (replacing whole)", object.getClass().getSimpleName(), object.getTableName(), object.getDatabaseId());
+
+        var collection = dbMantaro().getCollection(object.getTableName(), clazz);
+        var returnDoc = new FindOneAndReplaceOptions().returnDocument(ReturnDocument.AFTER);
+        var found = collection.findOneAndReplace(Filters.eq(object.getId()), object, returnDoc);
+        if (found == null) { // New document?
+            collection.insertOne(object);
+        }
+    }
+
+    public <T extends ManagedMongoObject> void deleteMongo(@Nonnull T object, Class<T> clazz) {
+        log("Deleting {} {}:{} from MongoDB (whole)", object.getClass().getSimpleName(), object.getTableName(), object.getDatabaseId());
+
+        MongoCollection<T> collection = dbMantaro().getCollection(object.getTableName(), clazz);
+        collection.deleteOne(Filters.eq(object.getId()));
+    }
+
+    public void updateFieldValue(ManagedMongoObject object, String key, Object value) {
+        log("Updating id {} key {} (from db {}) to {} (single value)", object.getId(), key, object.getTableName(), value);
+
+        var collection = dbMantaro().getCollection(object.getTableName());
+        collection.updateOne(Filters.eq(object.getId()), Updates.set(key, value), new UpdateOptions().upsert(true));
+    }
+
+    public void updateFieldValues(ManagedMongoObject object, Map<String, Object> map) {
+        log("Updating tracked set for id {} (db: {}, set size: {}) (batch values)", object.getId(), object.getTableName(), map.size(), object.getTableName());
+
+        // No need to try and save an empty set, just bail out.
+        if (map.isEmpty()) {
+            log("Empty tracked set when requesting update!");
+            return;
+        }
+
+        var collection = dbMantaro().getCollection(object.getTableName());
+        List<Bson> updates = new ArrayList<>();
+        map.forEach((key, value) -> {
+            if (value instanceof Map<?, ?> e) {
+                var keySet = e.keySet();
+                Object next = null;
+                if(!keySet.isEmpty()) {
+                    next = keySet.iterator().next();
+                }
+
+                // If key is of type Enum<T> or int/long, we need to convert them to String.
+                // Thankfully both have rather easy methods to do so: Enum returns the equivalent of name() on its default implementation,
+                // and String.valueOf works if you pass an object, which in the case of int/long, will give a String representation of the numerical value.
+                if (!keySet.isEmpty() && next instanceof Enum<?>) {
+                    updates.add(Updates.set(
+                            key,
+                            // Yes, seemingly this is needed.
+                            new Document(e.entrySet().stream().collect(Collectors.toMap(k -> k.getKey().toString(), Map.Entry::getValue))))
+                    );
+
+                    return; // This acts like continue; in a forEach loop
+                }
+
+                if (!keySet.isEmpty() && (next instanceof Integer || next instanceof Long)) {
+                    updates.add(Updates.set(
+                            key,
+                            // Yes, seemingly this is needed.
+                            new Document(e.entrySet().stream().collect(Collectors.toMap(k -> String.valueOf(k.getKey()), Map.Entry::getValue))))
+                    );
+
+                    return; // This acts like continue; in a forEach loop
+                }
+            }
+
+            updates.add(Updates.set(key, value));
+        });
+
+        log("Database Update with content: {}", updates.toString());
+        // Reminder: you NEED to use Updates.combine, else somehow Map objects will act really strangely (ex. will not remove deleted items, but will add new ones)
+        // Upsert means it's adding the document/embedded document if it does not exist on the current collection/document.
+        collection.updateOne(Filters.eq(object.getId()), Updates.combine(updates), new UpdateOptions().upsert(true));
+    }
+}

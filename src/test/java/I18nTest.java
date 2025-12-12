@@ -1,0 +1,34 @@
+/*
+ * Copyright (C) 2016-2020 David Rubio Escares / Kodehawa
+ *  
+ *  adr.xyz is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version. 
+ *  adr.xyz is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with adr.xyz.  If not, see http://www.gnu.org/licenses/
+ */
+
+import net.kodehawa.mantarobot.core.command.i18n.I18nContext;
+import net.kodehawa.mantarobot.db.entities.MongoGuild;
+import net.kodehawa.mantarobot.utils.LanguageKeyNotFoundException;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+class I18nTest {
+    @Test
+    void testI18n() throws LanguageKeyNotFoundException {
+        //Should default to en_US
+        I18nContext context = new I18nContext(new MongoGuild(), null);
+        Assertions.assertEquals("en_US", context.getContextLanguage());
+
+        String localized = context.get("test.inherited");
+        Assertions.assertNotNull(localized);
+        Assertions.assertEquals("owo", localized);
+    }
+}

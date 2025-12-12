@@ -1,0 +1,119 @@
+/*
+ * Copyright (C) 2016 Kodehawa
+ *
+ * Mantaro is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * Mantaro is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Mantaro. If not, see http://www.gnu.org/licenses/
+ *
+ */
+
+package net.kodehawa.mantarobot.core.command.processor;
+
+import io.prometheus.client.Histogram;
+import net.dv8tion.jda.api.events.interaction.command.CommandAutoCompleteInteractionEvent;
+import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
+import net.dv8tion.jda.api.events.interaction.command.UserContextInteractionEvent;
+import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
+import net.kodehawa.mantarobot.core.CommandRegistry;
+import net.kodehawa.mantarobot.data.MantaroData;
+
+import static net.kodehawa.mantarobot.utils.StringUtils.splitArgs;
+
+public class CommandProcessor {
+    public static final CommandRegistry REGISTRY = new CommandRegistry();
+    private static final Histogram commandTime = Histogram.build()
+            .name("command_time").help("Time it takes for a command to be ran.")
+            .register();
+
+    @SuppressWarnings("SameReturnValue")
+    public boolean runContextUser(UserContextInteractionEvent event) {
+        final long start = System.currentTimeMillis();
+        // Run the actual command here.
+        REGISTRY.process(event);
+
+        final long end = System.currentTimeMillis();
+        commandTime.observe(end - start);
+        return true;
+    }
+
+    @SuppressWarnings("SameReturnValue")
+    public boolean runSlash(SlashCommandInteractionEvent event) {
+        final long start = System.currentTimeMillis();
+        // Run the actual command here.
+        REGISTRY.process(event);
+
+        final long end = System.currentTimeMillis();
+        commandTime.observe(end - start);
+        return true;
+    }
+
+    public void runAutocomplete(CommandAutoCompleteInteractionEvent event) {
+        REGISTRY.processAutocomplete(event);
+    }
+
+    public boolean run(MessageReceivedEvent event) {
+        final long start = System.currentTimeMillis();
+        final var config = MantaroData.config().get();
+        // The command executed, in raw form.
+        var rawCmd = event.getMessage().getContentRaw();
+        // Lower-case raw cmd check, only used for prefix checking.
+        final var lowerRawCmd = rawCmd.toLowerCase();
+
+        // Mantaro prefixes.
+        String[] prefix = config.prefix;
+        // Guild-specific prefix.
+        final var dbGuild = MantaroData.db().getGuild(event.getGuild());
+        var customPrefix = dbGuild.getGuildCustomPrefix();
+        // Possible mentions
+        boolean isMention = false;
+        String[] mentionPrefixes = {
+                "<@%s> ".formatted(config.getClientId()),
+                "<@!%s> ".formatted(config.getClientId())
+        };
+
+        // What prefix did this person use.
+        String usedPrefix = null;
+        for (String mention : mentionPrefixes) {
+            if (lowerRawCmd.startsWith(mention)) {
+                usedPrefix = mention;
+                isMention = true;
+            }
+        }
+
+        for (String s : prefix) {
+            if (lowerRawCmd.startsWith(s)) {
+                usedPrefix = s;
+            }
+        }
+
+        // Remove prefix from arguments.
+        if (usedPrefix != null && lowerRawCmd.startsWith(usedPrefix.toLowerCase())) {
+            rawCmd = rawCmd.substring(usedPrefix.length());
+        } else if (customPrefix != null && lowerRawCmd.startsWith(customPrefix.toLowerCase())) {
+            rawCmd = rawCmd.substring(customPrefix.length());
+            usedPrefix = customPrefix;
+        } else if (usedPrefix == null) {
+            return false;
+        }
+
+        // The command arguments to parse.
+        String[] parts = splitArgs(rawCmd, 2);
+        String cmdName = parts[0];
+        String content = parts[1];
+
+        // Run the actual command here.
+        REGISTRY.process(event, dbGuild, cmdName, content, usedPrefix, isMention);
+
+        final long end = System.currentTimeMillis();
+        commandTime.observe(end - start);
+        return true;
+    }
+}

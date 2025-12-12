@@ -1,0 +1,195 @@
+/*
+ * Copyright (C) 2016 Kodehawa
+ *
+ * adr.xyz is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * adr.xyz is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with adr.xyz. If not, see http://www.gnu.org/licenses/
+ *
+ */
+import org.apache.tools.ant.filters.ReplaceTokens
+
+plugins {
+    id 'java'
+    id 'application'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
+}
+
+def ver = new Version(major: 8, minor: 2, revision: 0)
+version ver.toString()
+
+application {
+    mainClass = "net.kodehawa.mantarobot.MantaroBot"
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+    maven { url 'https://m2.dv8tion.net/releases' }
+}
+
+dependencies {
+    // Base
+    implementation 'net.dv8tion:JDA:5.0.0-beta.19'
+    implementation 'club.minnced:discord-webhooks:0.8.4'
+
+    // Music
+    implementation("dev.arbjerg:lavalink-client:2.2.0")
+
+    // JSON
+    implementation 'com.fasterxml.jackson.core:jackson-core:2.16.1'
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.16.1'
+
+    // Core
+    implementation 'io.github.classgraph:classgraph:4.8.165'
+    implementation 'ch.qos.logback:logback-classic:1.4.14'
+    implementation 'com.google.guava:guava:33.0.0-jre'
+    implementation 'commons-io:commons-io:2.15.1'
+    implementation 'org.java-websocket:Java-WebSocket:1.5.5'
+
+    // Database
+    implementation 'org.mongodb:mongodb-driver-sync:4.11.1'
+    implementation 'redis.clients:jedis:5.1.0'
+
+    // Utilities
+    implementation 'org.apache.commons:commons-lang3:3.14.0'
+    implementation 'org.apache.commons:commons-text:1.11.0'
+    implementation 'io.github.kodehawa:imageboard-api:2.6.1.1'
+
+    // Prometheus
+    implementation 'io.prometheus:simpleclient:0.9.0'
+    implementation 'io.prometheus:simpleclient_hotspot:0.9.0'
+    implementation 'io.prometheus:simpleclient_httpserver:0.9.0'
+
+    //Unit tests
+    testImplementation 'org.junit.jupiter:junit-jupiter-engine:5.10.1'
+}
+
+tasks.register('generateLanguageList') {
+    doLast {
+        def out = new PrintStream(new FileOutputStream(new File(project.rootDir, "src/main/resources/assets/languages/list.txt")))
+        new File(project.rootDir, "src/main/resources/assets/languages").listFiles().each {
+            if (it.getName().endsWith("json")) {
+                out.println(it.getName())
+            }
+        }
+
+        out.close()
+    }
+}
+
+tasks.register('ci') {
+    dependsOn shadowJar
+}
+
+def lint = [
+        "auxiliaryclass",
+        "cast",
+        "classfile",
+        "deprecation",
+        "dep-ann",
+        "divzero",
+        "empty",
+        "exports",
+        "fallthrough",
+        "finally",
+        "module",
+        "opens",
+        "options",
+        "overloads",
+        "overrides",
+        "path",
+        // removed because of "No processor claimed any of these annotations: ..."
+        //"processing",
+        "rawtypes",
+        "removal",
+        "requires-automatic",
+        "requires-transitive-automatic",
+        // removed because "non-transient instance field of a serializable class declared with a non-serializable type",
+        // believe me i know
+        //"serial",
+        "static",
+        "try",
+        "unchecked",
+        "varargs",
+        "preview"
+]
+
+def gitRevision() {
+    def gitVersion = new ByteArrayOutputStream()
+    exec {
+        commandLine("git", "rev-parse", "--short", "HEAD")
+        standardOutput = gitVersion
+    }
+
+    return gitVersion.toString().trim()
+}
+
+tasks.register('sourcesForRelease', Copy) {
+    from('src/main/java') {
+        include '**/MantaroInfo.java'
+        filter(ReplaceTokens, tokens: [
+                version : ver.toString(),
+                revision: gitRevision().toString()
+        ])
+    }
+    into 'build/filteredSrc'
+
+    includeEmptyDirs = false
+}
+
+tasks.register('generateJavaSources', SourceTask) {
+    def javaSources = sourceSets.main.allJava.filter {
+        it.name != 'MantaroInfo.java'
+    }
+    source = javaSources + sourcesForRelease.destinationDir
+
+    dependsOn sourcesForRelease
+}
+
+compileJava {
+    source = generateJavaSources.source
+    classpath = sourceSets.main.compileClasspath
+    options.compilerArgs += ["-Xlint:${lint.join(",")}"]
+
+    dependsOn generateJavaSources
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.incremental = true
+}
+
+shadowJar {
+    archiveClassifier.set(null)
+    exclude 'module-info.class'
+}
+
+// Damned Gradle 8
+compileJava.dependsOn generateLanguageList
+distZip.dependsOn shadowJar
+distTar.dependsOn shadowJar
+startScripts.dependsOn shadowJar
+startShadowScripts.dependsOn jar
+
+test.dependsOn generateLanguageList
+build.dependsOn shadowJar
+
+class Version {
+    String major, minor, revision
+
+    String toString() {
+        "${major}.${minor}.${revision}"
+    }
+}

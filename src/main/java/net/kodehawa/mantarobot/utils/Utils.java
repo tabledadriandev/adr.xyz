@@ -1,0 +1,637 @@
+/*
+ * Copyright (C) 2016 Kodehawa
+ *
+ * Mantaro is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * Mantaro is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Mantaro. If not, see http://www.gnu.org/licenses/
+ *
+ */
+
+package net.kodehawa.mantarobot.utils;
+
+import net.dv8tion.jda.api.Permission;
+import net.dv8tion.jda.api.entities.Role;
+import net.dv8tion.jda.api.entities.User;
+import net.kodehawa.mantarobot.MantaroInfo;
+import net.kodehawa.mantarobot.commands.utils.RoundedMetricPrefixFormat;
+import net.kodehawa.mantarobot.core.command.i18n.I18nContext;
+import net.kodehawa.mantarobot.data.annotations.ConfigName;
+import net.kodehawa.mantarobot.data.annotations.HiddenConfig;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import org.apache.commons.lang3.LocaleUtils;
+import org.jetbrains.annotations.NotNull;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.CheckReturnValue;
+import javax.annotation.Nonnull;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.FormatStyle;
+import java.time.temporal.TemporalUnit;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.TimeZone;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
+
+public class Utils {
+    private static final Logger log = LoggerFactory.getLogger(Utils.class);
+    private static final char ACTIVE_BLOCK = '\u2588';
+    private static final char EMPTY_BLOCK = '\u200b';
+
+    public static final OkHttpClient httpClient = new OkHttpClient();
+
+    private static final String BLOCK_INACTIVE = "\u25AC";
+    private static final String BLOCK_ACTIVE = "\uD83D\uDD18";
+    private static final int TOTAL_BLOCKS = 10;
+
+    // The regex to filter discord invites.
+    public static final Pattern DISCORD_INVITE = Pattern.compile("(?:discord(?:(?:\\.|.?dot.?)gg|app(?:\\.|.?dot.?)com/invite)/(?<id>" + "([\\w]{10,16}|[a-zA-Z0-9]{4,8})))");
+    public static final Pattern DISCORD_INVITE_2 = Pattern.compile("(?:https?://)?discord((?:app)?(?:\\.|\\s*?dot\\s*?)com\\s?/\\s*invite\\s*/\\s*|(?:\\.|\\s*dot\\s*)(?:gg|me|io)\\s*/\\s*)([a-zA-Z0-9\\-_]+)");
+    public static final Pattern HTTP_URL = Pattern.compile("([a-zA-Z\\d]+://)?(\\w+:\\w+@)?([a-zA-Z\\d.-]+\\.[A-Za-z]{2,4})(:\\d+)?(/.*)?");
+
+    // Formatting regex
+    public static final Pattern FORMAT_PATTERN = Pattern.compile("%\\d[$][,]?[a-zA-Z]");
+
+    private static final char BACKTICK = '`';
+    private static final char LEFT_TO_RIGHT_ISOLATE = '\u2066';
+    private static final char POP_DIRECTIONAL_ISOLATE = '\u2069';
+    private static final Pattern pattern = Pattern.compile("\\d+?[a-zA-Z]");
+
+    private static final EnumSet<Permission> ADMINISTRATIVE_DISCORD_PERMISSIONS = EnumSet.of(
+            Permission.ADMINISTRATOR,
+            Permission.BAN_MEMBERS,
+            Permission.KICK_MEMBERS,
+            Permission.MANAGE_SERVER,
+            Permission.MANAGE_ROLES,
+            Permission.MANAGE_PERMISSIONS,
+            Permission.MANAGE_CHANNEL,
+            Permission.MANAGE_WEBHOOKS,
+            Permission.MODERATE_MEMBERS,
+            Permission.VOICE_MUTE_OTHERS,
+            Permission.VIEW_GUILD_INSIGHTS,
+            Permission.VIEW_AUDIT_LOGS,
+            Permission.MANAGE_GUILD_EXPRESSIONS,
+            Permission.MANAGE_EVENTS,
+            Permission.NICKNAME_MANAGE,
+            Permission.MESSAGE_MANAGE,
+            Permission.VOICE_DEAF_OTHERS,
+            Permission.VOICE_MOVE_OTHERS,
+            Permission.MANAGE_THREADS
+
+    );
+
+    private static final RoundedMetricPrefixFormat prefixFormat = new RoundedMetricPrefixFormat();
+
+    /**
+     * Capitalizes the first letter of a string.
+     *
+     * @param s the string to capitalize
+     * @return A string with the first letter capitalized.
+     */
+    public static String capitalize(String s) {
+        if (s.isEmpty()) {
+            return s;
+        }
+
+        return s.substring(0, 1).toUpperCase() + s.substring(1).toLowerCase();
+    }
+
+    public static String formatDuration(I18nContext lang, long time) {
+        if (lang == null) {
+            lang = new I18nContext(); // default to en_US
+        }
+
+        if (time < 1000) {
+            return lang.get("time.little");
+        }
+
+        var days = TimeUnit.MILLISECONDS.toDays(time);
+        var hours = TimeUnit.MILLISECONDS.toHours(time) % TimeUnit.DAYS.toHours(1);
+        var minutes = TimeUnit.MILLISECONDS.toMinutes(time) % TimeUnit.HOURS.toMinutes(1);
+        var seconds = TimeUnit.MILLISECONDS.toSeconds(time) % TimeUnit.MINUTES.toSeconds(1);
+
+        var parts = Stream.of(
+                formatUnit(days, lang.get("time.day"), lang.get("time.days")),
+                formatUnit(hours, lang.get("time.hour"), lang.get("time.hours")),
+                formatUnit(minutes, lang.get("time.minute"), lang.get("time.minutes")),
+                formatUnit(seconds, lang.get("time.second"), lang.get("time.seconds"))
+        ).filter(i -> !i.isEmpty()).iterator();
+
+        var sb = new StringBuilder();
+        var multiple = false;
+
+        while(parts.hasNext()) {
+            sb.append(parts.next());
+            if (parts.hasNext()) {
+                multiple = true;
+                sb.append(", ");
+            }
+        }
+
+        if (multiple) {
+            var last = sb.lastIndexOf(", ");
+            sb.replace(last, last + 2, " " + lang.get("general.and") + " ");
+        }
+
+        return sb.toString();
+    }
+
+    public static long parseTime(String toParse) {
+        toParse = toParse.toLowerCase();
+        long[] time = { 0 };
+
+        iterate(pattern.matcher(toParse)).forEach(string -> {
+            var l = string.substring(0, string.length() - 1);
+            var unit = switch (string.charAt(string.length() - 1)) {
+                case 'm' -> TimeUnit.MINUTES;
+                case 'h' -> TimeUnit.HOURS;
+                case 'd' -> TimeUnit.DAYS;
+                default -> TimeUnit.SECONDS;
+            };
+
+            time[0] += unit.toMillis(Long.parseLong(l));
+        });
+
+        return time[0];
+    }
+
+    private static String formatUnit(long amount, String baseName, String pluralName) {
+        if (amount == 0) {
+            return "";
+        }
+
+        if (amount == 1) {
+            return "1 " + baseName;
+        }
+
+        // Languages other than english do plurals differently, so :tada:
+        return amount + " " + pluralName;
+    }
+
+    public static Locale getLocaleFromLanguage(I18nContext context) {
+        return getLocaleFromLanguage(context.getContextLanguage());
+    }
+
+    public static Locale getLocaleFromLanguage(String language) {
+        // No need to pass it to LocaleUtils if we pass nothing to this.
+        if (language == null || language.isEmpty()) {
+            return Locale.ENGLISH;
+        }
+
+        // Parse the user's language settings to attempt to get the locale.
+        Locale locale = null;
+        try {
+            locale = LocaleUtils.toLocale(language);
+        } catch (IllegalArgumentException ignore) { }
+
+        if (locale == null) {
+            locale = Locale.ENGLISH;
+        }
+
+        return locale;
+    }
+
+    public static String paste(String toSend) {
+        return paste(toSend, false);
+    }
+
+    public static String paste(String toSend, boolean expireLater) {
+        var expire = ZonedDateTime.now(ZoneOffset.UTC).plusHours(expireLater ? 48 : 1).format(DateTimeFormatter.ISO_INSTANT);
+        var jsonMessage = new JSONObject()
+                .put("name", "pasted_file_mantaro.txt")
+                .put("content", new JSONObject().put("format", "text").put("value", toSend));
+
+        var message = new JSONObject()
+                .put("name", "Mantaro Pasted Data")
+                .put("visibility", "unlisted")
+                .put("expires", expire)
+                .put("files", new JSONArray().put(jsonMessage));
+
+        var post = RequestBody.create(message.toString(), MediaType.parse("application/json"));
+        var toPost = new Request.Builder()
+                .url("https://api.paste.gg/v1/pastes")
+                .header("User-Agent", MantaroInfo.USER_AGENT)
+                .header("Content-Type", "application/json")
+                .post(post)
+                .build();
+
+        try {
+            try (var r = httpClient.newCall(toPost).execute()) {
+                if (r.body() == null) {
+                    throw new IllegalArgumentException();
+                }
+
+                var string = r.body().string();
+                return "https://paste.gg/p/anonymous/%s"
+                        .formatted(new JSONObject(string).getJSONObject("result").getString("id"));
+            }
+        } catch (Exception e) {
+            log.error("Cannot post data to paste.gg", e);
+            return "cannot post data to paste.gg";
+        }
+    }
+
+    public static String httpRequest(String url) {
+        try {
+            var req = new Request.Builder()
+                    .url(url)
+                    .header("User-Agent", MantaroInfo.USER_AGENT)
+                    .build();
+
+            try (var r = httpClient.newCall(req).execute()) {
+                if (r.body() == null || r.code() / 100 != 2) {
+                    if (r.code() != 404) {
+                        log.warn("Non 404 code failure for {}: {}", url, r.code());
+                    }
+
+                    return null;
+                }
+
+                return r.body().string();
+            }
+        } catch (Exception e) {
+            log.warn("Exception trying to fetch from URL {}", url, e);
+            return null;
+        }
+    }
+
+    public static String urlEncodeUTF8(Map<?, ?> map) {
+        var sb = new StringBuilder();
+        for (var entry : map.entrySet()) {
+            if (!sb.isEmpty()) {
+                sb.append("&");
+            }
+
+            sb.append(String.format("%s=%s",
+                    urlEncodeUTF8(entry.getKey().toString()),
+                    urlEncodeUTF8(entry.getValue().toString())
+            ));
+        }
+        return sb.toString();
+    }
+
+    private static String urlEncodeUTF8(String s) {
+        return URLEncoder.encode(s, StandardCharsets.UTF_8);
+    }
+
+    public static Iterable<String> iterate(Pattern pattern, String string) {
+        return () -> {
+            var matcher = pattern.matcher(string);
+            return new Iterator<>() {
+                @Override
+                public boolean hasNext() {
+                    return matcher.find();
+                }
+
+                @Override
+                public String next() {
+                    return matcher.group();
+                }
+            };
+        };
+    }
+
+    private static Iterable<String> iterate(Matcher matcher) {
+        return new Iterable<>() {
+            @NotNull
+            @Override
+            public Iterator<String> iterator() {
+                return new Iterator<>() {
+                    @Override
+                    public boolean hasNext() {
+                        return matcher.find();
+                    }
+
+                    @Override
+                    public String next() {
+                        return matcher.group();
+                    }
+                };
+            }
+
+            @Override
+            public void forEach(Consumer<? super String> action) {
+                while (matcher.find()) {
+                    action.accept(matcher.group());
+                }
+            }
+        };
+    }
+
+    public static String replaceArguments(Map<String, ?> args, String content, String... toReplace) {
+        if (args == null || args.isEmpty()) {
+            return content;
+        }
+
+        var contentReplaced = content;
+
+        for (var s : toReplace) {
+            if (args.containsKey(s)) {
+                contentReplaced = contentReplaced
+                        .replace(" -" + s, "")
+                        .replace("-" + s, "");
+            }
+        }
+
+        return contentReplaced;
+    }
+
+    public static boolean isValidTimeZone(final String timeZone) {
+        if (timeZone.equals("GMT") || timeZone.equals("UTC")) {
+            return true;
+        } else {
+            String id = TimeZone.getTimeZone(timeZone).getID();
+            return !id.equals("GMT");
+        }
+    }
+
+    public static ZoneId timezoneToZoneID(final String timeZone) {
+        if (timeZone == null) {
+            return ZoneId.systemDefault();
+        }
+
+        return TimeZone.getTimeZone(timeZone).toZoneId();
+    }
+
+    private static String formatMemoryHelper(long bytes, long unitSize, String unit) {
+        if (bytes % unitSize == 0) {
+            return String.format("%d %s", bytes / unitSize, unit);
+        }
+
+        return String.format("%.1f %s", bytes / (double) unitSize, unit);
+    }
+
+    public static String formatMemoryAmount(long bytes) {
+        if (bytes > 1L << 30) {
+            return formatMemoryHelper(bytes, 1L << 30, "GiB");
+        }
+
+        if (bytes > 1L << 20) {
+            return formatMemoryHelper(bytes, 1L << 20, "MiB");
+        }
+
+        if (bytes > 1L << 10) {
+            return formatMemoryHelper(bytes, 1L << 10, "KiB");
+        }
+
+        return String.format("%d B", bytes);
+    }
+
+    public static String formatDate(OffsetDateTime date) {
+        return date.format(DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM));
+    }
+
+    public static String formatHours(OffsetDateTime date, String zone, String locale) {
+        return date.format(DateTimeFormatter.ofPattern("HH:mm:ss")
+                .withZone(timezoneToZoneID(zone))
+                .withLocale(getLocaleFromLanguage(locale)));
+    }
+
+    public static String formatDate(LocalDateTime date, String lang) {
+        return date.format(DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM)
+                .withLocale(getLocaleFromLanguage(lang)));
+    }
+
+    @SafeVarargs
+    @SuppressWarnings("varargs")
+    public static <T> LinkedList<T> createLinkedList(T... elements) {
+        LinkedList<T> list = new LinkedList<>();
+        Collections.addAll(list, elements);
+
+        return list;
+    }
+
+    public static String bar(long percent, long total) {
+        var activeBlocks = (int) (percent / 100f * total);
+        var builder = new StringBuilder().append('`').append(EMPTY_BLOCK);
+
+        for (long i = 0; i < total; i++) {
+            builder.append(activeBlocks > i ? ACTIVE_BLOCK : ' ');
+        }
+
+        return builder.append(EMPTY_BLOCK).append('`').toString();
+    }
+
+    /**
+     * Fixes the direction of the rendering of the text inside `inline codeblocks` to
+     * be always left to right.
+     *
+     * @param src Source string.
+     *
+     * @return String with appropriate unicode direction modifier characters
+     *         around code blocks.
+     */
+    @Nonnull
+    @CheckReturnValue
+    public static String fixInlineCodeblockDirection(@Nonnull String src) {
+        // if there's no right to left override, there's nothing to do
+        if (!isRtl(src)) {
+            return src;
+        }
+
+        // no realloc unless we somehow have 5 codeblocks
+        var sb = new StringBuilder(src.length() + 8);
+        var inside = false;
+
+        for (var i = 0; i < src.length(); i++) {
+            var ch = src.charAt(i);
+            if (ch == BACKTICK) {
+                if (inside) {
+                    sb.append(BACKTICK)
+                            .append(POP_DIRECTIONAL_ISOLATE);
+                } else {
+                    sb.append(LEFT_TO_RIGHT_ISOLATE)
+                            .append(BACKTICK);
+                }
+                inside = !inside;
+            } else {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static boolean isRtl(String string) {
+        // Well why bother...
+        if (string == null) {
+            return false;
+        }
+
+        // This is a workaround. Most translated strings will have %[number]$s or %[number]$,d, which happens to be LTR.
+        // This happened because using Notepad++ to translate RTL text works, but will insert LTR hints on latin letters, which fucked
+        // this detection hard as it returned LTR inmediatly on the first match (%). This will remove all Java formatting hints and
+        // trim the string to get a "clean" state. This will not interfere with the actual string and it's only used on detection.
+        string = FORMAT_PATTERN.matcher(string).replaceAll("").trim();
+
+        for (int i = 0, n = string.length(); i < n; ++i) {
+            var d = Character.getDirectionality(string.charAt(i));
+            switch (d) {
+                case Character.DIRECTIONALITY_RIGHT_TO_LEFT, Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC,
+                        Character.DIRECTIONALITY_RIGHT_TO_LEFT_EMBEDDING, Character.DIRECTIONALITY_RIGHT_TO_LEFT_OVERRIDE -> {
+                    return true;
+                }
+                case Character.DIRECTIONALITY_LEFT_TO_RIGHT, Character.DIRECTIONALITY_LEFT_TO_RIGHT_EMBEDDING,
+                        Character.DIRECTIONALITY_LEFT_TO_RIGHT_OVERRIDE -> {
+                    return false;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    public static <T, E> T getKeyByValue(Map<T, E> map, E value) {
+        for (var entry : map.entrySet()) {
+            if (Objects.equals(value, entry.getValue())) {
+                return entry.getKey();
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Retrieves a map of objects in a class and its respective values.
+     * Yes, I'm too lazy to do it manually and it would make absolutely no sense to either.
+     * <p>
+     * Modified it a bit. (Original: <a href="https://narendrakadali.wordpress.com/2011/08/27/41/">https://narendrakadali.wordpress.com/2011/08/27/41/</a>)
+     *
+     * @author Narendra
+     * @since Aug 27, 2011 5:27:19 AM
+     */
+    public static Map<String, Pair<String, Object>> mapConfigObjects(Object valueObj) {
+        try {
+            var clazz = valueObj.getClass();
+            var valueObjFields = clazz.getDeclaredFields();
+
+            HashMap<String, Pair<String, Object>> fieldMap = new HashMap<>();
+
+            for (var valueObjField : valueObjFields) {
+                var fieldName = valueObjField.getName();
+                var fieldDescription = "unknown";
+                valueObjField.setAccessible(true);
+
+                Object newObj = valueObjField.get(valueObj);
+
+                if (valueObjField.getAnnotation(HiddenConfig.class) != null ||
+                        valueObjField.getAnnotation(ConfigName.class) == null) {
+                    continue;
+                }
+
+                if (valueObjField.getAnnotation(ConfigName.class) != null) {
+                    fieldDescription = valueObjField
+                            .getAnnotation(ConfigName.class)
+                            .value();
+                }
+
+                fieldMap.put(fieldName, Pair.of(fieldDescription, newObj));
+            }
+
+            return fieldMap;
+        } catch (IllegalAccessException e) {
+            return null;
+        }
+    }
+
+    public static String getProgressBar(long now, long total) {
+        var activeBlocks = (int) ((float) now / total * TOTAL_BLOCKS);
+        var builder = new StringBuilder();
+        for (var i = 0; i < TOTAL_BLOCKS; i++)
+            builder.append(activeBlocks == i ? BLOCK_ACTIVE : BLOCK_INACTIVE);
+
+        return builder.append(BLOCK_INACTIVE).toString();
+    }
+
+    public static <T extends Enum<T>> T lookupEnumString(String name, Class<T> enumType) {
+        for (var t : enumType.getEnumConstants()) {
+            if (t.name().equalsIgnoreCase(name)) {
+                return t;
+            }
+        }
+
+        return null;
+    }
+
+    public static String roundPrefixNumber(Object number) {
+        return prefixFormat.format(number, new StringBuffer(6)).toString();
+    }
+
+    public static String getTagOrDisplay(User user) {
+        if (user.getDiscriminator().equals("0000") || user.getDiscriminator().equals("0")) {
+            return user.getName();
+        } else {
+            return user.getAsTag();
+        }
+    }
+
+    public static <T> Map<T, T> toMap(final T[][] array) {
+        if (array == null) {
+            return null;
+        }
+        final Map<T, T> map = new HashMap<>();
+        for (final T[] entry : array) {
+            map.put(entry[0], entry[1]);
+        }
+        return map;
+    }
+
+    // Basically returns true if the role has a role that can mess around with other users.
+    // Usually this check wouldn't be needed, as we check for interaction permissions, but this is just an extra check to
+    // avoid foot-guns.
+    // This is only really used to avoid people setting roles with elevated permissions as
+    // birthday role etc.
+    // Important to note is that this only checks *explicitly* granted permissions.
+    // In other words the @everyone role permissions are ignored.
+    public static boolean isRoleAdministrative(Role role) {
+        // as outlined by JDA docs getPermissions() == getPermissionsExplicit() for roles.
+        EnumSet<Permission> permissions = role.getPermissions();
+        return !Collections.disjoint(permissions, ADMINISTRATIVE_DISCORD_PERMISSIONS);
+    }
+
+    public static String decodeURL(String s) {
+        return URLDecoder.decode(s, StandardCharsets.UTF_8);
+    }
+
+    public static String encodeURL(String s) {
+        return URLEncoder.encode(s, StandardCharsets.UTF_8);
+    }
+
+    public enum HushType {
+        ANIME, CHARACTER, MUSIC
+    }
+
+    public static boolean isAccountOldEnough(User user, int time, TemporalUnit unit) {
+        return user.getTimeCreated().isBefore(OffsetDateTime.now().minus(time, unit));
+    }
+}

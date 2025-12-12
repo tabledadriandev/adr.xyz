@@ -1,0 +1,98 @@
+/*
+ * Copyright (C) 2016 Kodehawa
+ *
+ * Mantaro is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * Mantaro is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with Mantaro. If not, see http://www.gnu.org/licenses/
+ *
+ */
+
+package net.kodehawa.mantarobot.commands.game;
+
+import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
+import net.kodehawa.mantarobot.commands.game.core.ImageGame;
+import net.kodehawa.mantarobot.commands.game.core.PokemonGameData;
+import net.kodehawa.mantarobot.commands.game.core.lobby.GameLobby;
+import net.kodehawa.mantarobot.core.listeners.operations.InteractiveOperations;
+import net.kodehawa.mantarobot.core.listeners.operations.core.InteractiveOperation;
+import net.kodehawa.mantarobot.utils.APIUtils;
+import net.kodehawa.mantarobot.utils.commands.EmoteReference;
+import net.kodehawa.mantarobot.utils.data.JsonDataManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.List;
+
+public class Pokemon extends ImageGame {
+    private static final Logger log = LoggerFactory.getLogger("Game [Pokemon Trivia]");
+    private static final int maxAttempts = 5;
+    private List<String> expectedAnswer;
+
+    public Pokemon() {
+        super(10);
+    }
+
+    @Override
+    public void call(GameLobby lobby, List<String> players) {
+        InteractiveOperations.create(lobby.getChannel(), Long.parseLong(lobby.getPlayers().get(0)), 60, new InteractiveOperation() {
+            @Override
+            public int run(MessageReceivedEvent event) {
+                return callDefault(event, lobby, players, expectedAnswer, getAttempts(), maxAttempts, 15);
+            }
+
+            @Override
+            public void onExpire() {
+                if (lobby.getChannel() == null) {
+                    GameLobby.LOBBYS.remove(Long.parseLong(lobby.getChannelId()));
+                    return;
+                }
+
+                lobby.getChannel().sendMessageFormat(
+                        lobby.getLanguageContext().get("commands.game.lobby_timed_out"),
+                        EmoteReference.ERROR, String.join(", ", expectedAnswer)
+                ).queue();
+
+                GameLobby.LOBBYS.remove(lobby.getChannel().getIdLong());
+            }
+
+            @Override
+            public void onCancel() {
+                GameLobby.LOBBYS.remove(lobby.getChannel().getIdLong());
+            }
+        });
+    }
+
+    @Override
+    public boolean onStart(GameLobby lobby) {
+        final var lang = lobby.getLanguageContext();
+
+        try {
+            var data = JsonDataManager.fromJson(APIUtils.getFrom("/mantaroapi/bot/pokemon"), PokemonGameData.class);
+            expectedAnswer = data.getNames();
+            sendEmbedImage(lobby.getContext(), data.getImage(), eb ->
+                    eb.setAuthor(lang.get("commands.game.pokemon.header"), null, lobby.getContext().getAuthor().getEffectiveAvatarUrl())
+                        .setFooter(lang.get("commands.game.pokemon.footer").formatted(maxAttempts), null)
+            );
+
+            lobby.setGameLoaded(true);
+            return true;
+        } catch (Exception e) {
+            lobby.getChannel().sendMessageFormat(lang.get("commands.game.error"), EmoteReference.ERROR).queue();
+            log.warn("Exception while setting up a game", e);
+            return false;
+        }
+    }
+
+    @Override
+    public String name() {
+        return "pokemon";
+    }
+}
